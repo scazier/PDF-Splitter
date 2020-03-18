@@ -6,6 +6,7 @@ from PyQt5.QtCore import *
 # https://doc.qt.io/qt-5/qtwidgets-widgets-imageviewer-example.html
 
 screen_size = (None,None)
+fitWindowBool = False
 
 def preBuild(app):
     global screen_size
@@ -21,15 +22,10 @@ class App(QMainWindow):
         self.initUI()
 
     def initUI(self):
-        self.verticalLayout = QVBoxLayout()
-        self.verticalLayout.setObjectName("verticalLayout")
-        self.toolBarLayout = QHBoxLayout()
-        self.toolBarLayout.setObjectName("toolBarLayout")
-        self.toolBarLayout.addWidget(self.toolBar())
-        self.verticalLayout.addLayout(self.toolBarLayout)
-        self.verticalLayout.addWidget(self.workSpace())
 
-        print(screen_size)
+        self.toolBar()
+        self.workSpace()
+
         self.showMaximized()
         self.center()
         self.setWindowTitle('pdfSeparator')
@@ -39,15 +35,36 @@ class App(QMainWindow):
         self.toolbar.setMovable(False)
 
         # Exit Icon to quit the App
-        exitAction = QAction(QIcon('icon/exit.png'), '&Quit', self)
-        exitAction.setShortcut('Ctrl+Q')
-        exitAction.triggered.connect(self.onExit)
-        self.toolbar.addAction(exitAction)
+        self.exitAction = QAction(QIcon('icon/exit.png'), '&Quit', self)
+        self.exitAction.setShortcut('Ctrl+Q')
+        self.exitAction.triggered.connect(self.onExit)
+        self.toolbar.addAction(self.exitAction)
+
+        self.openAction = QAction(QIcon('icon/open.png'), '&Open file', self)
+        self.openAction.setShortcut('Ctrl+O')
+        self.openAction.triggered.connect(self.open)
+        self.toolbar.addAction(self.openAction)
+
+        #self.addToolBar(QIcon('icon/zoom.png'))
+
+        self.zoomOutAction = QAction(QIcon('icon/minus.png'), '&Zoom Out', self)
+        #zoomOutAction.setShortCut('Ctrl+Maj+-')
+        self.zoomOutAction.triggered.connect(self.zoomOut)
+        self.toolbar.addAction(self.zoomOutAction)
+
+        self.zoomInAction = QAction(QIcon('icon/plus.png'), '&Zoom In', self)
+        #zoomInAction.setShortCut('Ctrl+Maj+=')
+        self.zoomInAction.triggered.connect(self.zoomIn)
+        self.toolbar.addAction(self.zoomInAction)
+
+        self.fitWindowAction = QAction(QIcon('icon/fitOff.png'), '&Adjust', self)
+        self.fitWindowAction.triggered.connect(self.fitToWindow)
+        self.toolbar.addAction(self.fitWindowAction)
 
     def workSpace(self):
         self.workSpaceLayout = QVBoxLayout()
 
-        self.pixMap = QPixmap('icon/pythonLogo.png')
+        self.pixMap = QPixmap('exampleImage/pythonLogo.png')
 
         self.label = QLabel()
 
@@ -64,22 +81,66 @@ class App(QMainWindow):
 
 
 
-    def openImage(self):
+    def open(self):
         options = QFileDialog.Options()
-        filename = QFileDialog.getOpenFilename(self, 'Sélectionner une image','','Images (*.png *.jpeg *.jpg *.bmp *.gif)', options=options)
+        filename, _ = QFileDialog.getOpenFileName(self, 'Sélectionner une image','','Images (*.png *.jpeg *.jpg *.bmp *.gif)', options=options)
         # Modifier pour prendre un pdf puis convertir
 
         if filename:
             image = QImage(filename)
-            if image == null:
+            if image is None:
                 QMessageBox.information(self, '', "Impossible de charger {}".format(filename))
                 return
 
             self.label.setPixmap(QPixmap.fromImage(image))
-            self.scaleFactor = 1
+            self.factor = 1
 
             self.scrollArea.setVisible(True)
-            self.printAct.setEnabled(True)
+            #self.printAct.setEnabled(True)
+            self.fitWindowAction.setEnabled(True)
+            self.update()
+
+            if not self.fitWindowAction.isChecked():
+                self.label.adjustSize()
+
+    def zoomIn(self):
+        self.scaleImage(1.25)
+
+    def zoomOut(self):
+        self.scaleImage(0.75)
+
+    def normalSize(self):
+        self.label.adjustSize()
+        self.factor = 1.0
+
+    def fitToWindow(self):
+        global fitWindowBool
+        self.scrollArea.setWidgetResizable(fitWindowBool)
+
+        if not fitWindowBool:
+            self.normalSize()
+            self.fitWindowAction.setIcon(QIcon('icon/fitOff.png'))
+        else:
+            self.fitWindowAction.setIcon(QIcon('icon/fitOn.png'))
+
+        self.update()
+        fitWindowBool = not fitWindowBool
+
+    def update(self):
+        global fitWindowBool
+        self.zoomInAction.setEnabled(not fitWindowBool)
+        self.zoomOutAction.setEnabled(not fitWindowBool)
+
+    def scaleImage(self, factor):
+        self.factor *= factor
+        self.label.resize(self.factor * self.label.pixmap().size())
+        self.adjustScrollBar(self.scrollArea.horizontalScrollBar(), factor)
+        self.adjustScrollBar(self.scrollArea.verticalScrollBar(), factor)
+        self.zoomInAction.setEnabled(self.factor < 3.0)
+        self.zoomOutAction.setEnabled(self.factor > .333)
+
+    def adjustScrollBar(self, scrollBar, factor):
+        scrollBar.setValue(int(factor * scrollBar.value() + ((factor - 1 ) * scrollBar.pageStep() / 2 )))
 
 
     def onExit(self, event):
