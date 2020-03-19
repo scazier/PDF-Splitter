@@ -6,7 +6,6 @@ from PyQt5.QtCore import *
 # https://doc.qt.io/qt-5/qtwidgets-widgets-imageviewer-example.html
 
 screen_size = (None,None)
-fitWindowBool = False
 
 def preBuild(app):
     global screen_size
@@ -17,20 +16,22 @@ class App(QMainWindow):
     def __init__(self):
         super().__init__()
         #(self.width, self.height) = (1000,800)
-        self.toolBarHeight = 38
 
         self.initUI()
 
     def initUI(self):
 
         self.toolBar()
-        self.workSpace()
+        self.initWorkSpace()
+        self.initPaint()
 
         self.showMaximized()
         self.center()
         self.setWindowTitle('pdfSeparator')
 
     def toolBar(self):
+        self.toolBarHeight = 38
+
         self.toolbar = self.addToolBar('toolbar')
         self.toolbar.setMovable(False)
 
@@ -50,24 +51,29 @@ class App(QMainWindow):
         self.zoomOutAction = QAction(QIcon('icon/minus.png'), '&Zoom Out', self)
         #zoomOutAction.setShortCut('Ctrl+Maj+-')
         self.zoomOutAction.triggered.connect(self.zoomOut)
+        self.zoomOutAction.setEnabled(False)
         self.toolbar.addAction(self.zoomOutAction)
 
         self.zoomInAction = QAction(QIcon('icon/plus.png'), '&Zoom In', self)
         #zoomInAction.setShortCut('Ctrl+Maj+=')
         self.zoomInAction.triggered.connect(self.zoomIn)
+        self.zoomInAction.setEnabled(False)
         self.toolbar.addAction(self.zoomInAction)
 
         self.fitWindowAction = QAction(QIcon('icon/fitOff.png'), '&Adjust', self)
         self.fitWindowAction.triggered.connect(self.fitToWindow)
+        self.fitWindowAction.setEnabled(False)
         self.toolbar.addAction(self.fitWindowAction)
 
-    def workSpace(self):
-        self.workSpaceLayout = QVBoxLayout()
+        self.penAction = QAction(QIcon('icon/penOff.png'), '&Pen', self)
+        self.penAction.triggered.connect(self.penActivation)
+        self.toolbar.addAction(self.penAction)
+        self.penActivationStatus = False
 
-        self.pixMap = QPixmap('exampleImage/pythonLogo.png')
+    def initWorkSpace(self):
+        self.fitWindowBool = False
 
         self.label = QLabel()
-
         self.label.setBackgroundRole(QPalette.Base)
         self.label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.label.setScaledContents(True)
@@ -79,26 +85,73 @@ class App(QMainWindow):
 
         self.setCentralWidget(self.scrollArea)
 
+    def initPaint(self):
+        self.penWidth = 10
+        self.sketch = False
+        self.penColor = QColor(51,51,255)
+        self.lastPoint = QPoint()
+        self.image = None
 
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        #painter.drawPixmap(self.rect(), self.image)
+
+    def mousePressEvent(self, event):
+        if (event.button() == Qt.LeftButton) and self.sketch:
+            self.lastPoint = event.pos()
+
+            if (self.penActivationStatus):
+                painter = QPainter(self.image)
+                painter.setPen(QPen(self.penColor, self.penWidth,
+                                    Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+                painter.drawPoint(event.pos())
+                self.displayUpdate()
+
+    def mouseReleaseEvent(self, event):
+        if (event.button() == Qt.LeftButton) and self.sketch:
+            if (self.lastPoint == event.pos()):
+                # painter = QPainter(self.image)
+                # painter.setPen(QPen(self.penColor, self.penWidth,
+                #                     Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+                # paint.drawPoint(event.pos())
+                pass
+
+
+    def mouseMoveEvent(self, event):
+        if (event.buttons() & Qt.LeftButton) and self.sketch:
+            if (self.penActivationStatus):
+                painter = QPainter(self.image)
+                painter.setPen(QPen(self.penColor, self.penWidth,
+                                    Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+                painter.drawLine(self.lastPoint, event.pos())
+                self.lastPoint = event.pos()
+                self.displayUpdate()
+
+    def displayUpdate(self):
+        self.update()
+        self.label.setPixmap(self.image)
 
     def open(self):
         options = QFileDialog.Options()
         filename, _ = QFileDialog.getOpenFileName(self, 'Sélectionner une image','','Images (*.png *.jpeg *.jpg *.bmp *.gif)', options=options)
         # Modifier pour prendre un pdf puis convertir
-
         if filename:
             image = QImage(filename)
             if image is None:
                 QMessageBox.information(self, '', "Impossible de charger {}".format(filename))
                 return
 
-            self.label.setPixmap(QPixmap.fromImage(image))
+            self.image = QPixmap.fromImage(image)
+            self.label.setPixmap(self.image)
             self.factor = 1
+
+            self.sketch = True # Allow to paint the image now
 
             self.scrollArea.setVisible(True)
             #self.printAct.setEnabled(True)
             self.fitWindowAction.setEnabled(True)
-            self.update()
+            self.zoomInAction.setEnabled(True)
+            self.zoomOutAction.setEnabled(True)
 
             if not self.fitWindowAction.isChecked():
                 self.label.adjustSize()
@@ -114,22 +167,20 @@ class App(QMainWindow):
         self.factor = 1.0
 
     def fitToWindow(self):
-        global fitWindowBool
-        self.scrollArea.setWidgetResizable(fitWindowBool)
-
-        if not fitWindowBool:
-            self.normalSize()
+        self.scrollArea.setWidgetResizable(not self.fitWindowBool)
+        print('Before: ',self.fitWindowBool)
+        if self.fitWindowBool:
             self.fitWindowAction.setIcon(QIcon('icon/fitOff.png'))
+            self.normalSize()
         else:
             self.fitWindowAction.setIcon(QIcon('icon/fitOn.png'))
 
-        self.update()
-        fitWindowBool = not fitWindowBool
+        self.updateFit()
+        self.fitWindowBool = not self.fitWindowBool
 
-    def update(self):
-        global fitWindowBool
-        self.zoomInAction.setEnabled(not fitWindowBool)
-        self.zoomOutAction.setEnabled(not fitWindowBool)
+    def updateFit(self):
+        self.zoomInAction.setEnabled(self.fitWindowBool)
+        self.zoomOutAction.setEnabled(self.fitWindowBool)
 
     def scaleImage(self, factor):
         self.factor *= factor
@@ -149,6 +200,14 @@ class App(QMainWindow):
             app.quit()
         else:
             pass
+
+    def penActivation(self):
+
+        if self.penActivationStatus:
+            self.penAction.setIcon(QIcon('icon/penOff.png'))
+        else:
+            self.penAction.setIcon(QIcon('icon/penOn.png'))
+        self.penActivationStatus = not self.penActivationStatus
 
     def center(self):
         qr = self.frameGeometry()
