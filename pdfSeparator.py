@@ -1,4 +1,5 @@
 import sys
+import copy
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
@@ -25,13 +26,12 @@ class App(QMainWindow):
         self.initWorkSpace()
         self.initPaint()
 
-        self.showMaximized()
+        self.resize(1000,800)
+        #self.showMaximized()
         self.center()
         self.setWindowTitle('pdfSeparator')
 
     def toolBar(self):
-        self.toolBarHeight = 38
-
         self.toolbar = self.addToolBar('toolbar')
         self.toolbar.setMovable(False)
 
@@ -46,7 +46,7 @@ class App(QMainWindow):
         self.openAction.triggered.connect(self.open)
         self.toolbar.addAction(self.openAction)
 
-        #self.addToolBar(QIcon('icon/zoom.png'))
+        #self.toolbar.addWidget(QIcon('icon/zoom.png'))
 
         self.zoomOutAction = QAction(QIcon('icon/minus.png'), '&Zoom Out', self)
         #zoomOutAction.setShortCut('Ctrl+Maj+-')
@@ -66,9 +66,29 @@ class App(QMainWindow):
         self.toolbar.addAction(self.fitWindowAction)
 
         self.penAction = QAction(QIcon('icon/penOff.png'), '&Pen', self)
-        self.penAction.triggered.connect(self.penActivation)
+        self.penAction.triggered.connect(self.onPenStatus)
         self.toolbar.addAction(self.penAction)
         self.penActivationStatus = False
+
+        self.zoneAction = QAction(QIcon('icon/zoneRectangleOff.png'), '&Zone rectangle', self)
+        self.zoneAction.triggered.connect(self.onZoneStatus)
+        self.toolbar.addAction(self.zoneAction)
+        self.zoneActivationStatus = False
+
+        self.zoneLineAction = QAction(QIcon('icon/zoneLineOff.png'), '&Zone line', self)
+        self.zoneLineAction.triggered.connect(self.onZoneLineStatus)
+        self.toolbar.addAction(self.zoneLineAction)
+        self.zoneLineActivationStatus = False
+
+        self.zonePointAction = QAction(QIcon('icon/zonePointOff.png'), '&Zone point', self)
+        self.zonePointAction.triggered.connect(self.onZonePointStatus)
+        self.toolbar.addAction(self.zonePointAction)
+        self.zonePointActivationStatus = False
+
+        self.extractAction = QAction(QIcon('icon/zoom.png'), '&Extract area', self)
+        self.extractAction.triggered.connect(self.onExtract)
+        self.toolbar.addAction(self.extractAction)
+        self.extractActivation = False
 
     def initWorkSpace(self):
         self.fitWindowBool = False
@@ -86,36 +106,69 @@ class App(QMainWindow):
         self.setCentralWidget(self.scrollArea)
 
     def initPaint(self):
-        self.penWidth = 10
         self.sketch = False
+        self.penWidth = 4
         self.penColor = QColor(51,51,255)
+        self.pen = QPen(self.penColor, self.penWidth, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
         self.lastPoint = QPoint()
         self.image = None
+        # The history parameter is to remove last element drawn
+        self.history = []
+        self.historyLength = 10
+        self.historyShortCut = QShortcut(QKeySequence('Ctrl+Z'), self).activated.connect(self.goBack)
+        self.inEvent = False
+
+        self.zonePointList = []
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        #painter.drawPixmap(self.rect(), self.image)
 
     def mousePressEvent(self, event):
         if (event.button() == Qt.LeftButton) and self.sketch:
-            self.lastPoint = event.pos()
+            self.lastPoint = self.cropEventPos(event)
 
-            if (self.penActivationStatus):
+            if not self.inEvent:
+                self.addHistory()
+
+            if self.zoneActivationStatus or self.zoneLineActivationStatus:
+                self.topCorner = self.lastPoint
+
+            if self.penActivationStatus or self.zonePointActivationStatus:
                 painter = QPainter(self.image)
-                painter.setPen(QPen(self.penColor, self.penWidth,
-                                    Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-                painter.drawPoint(event.pos())
+                painter.setPen(self.pen)
+                painter.drawPoint(self.cropEventPos(event))
+
+                if self.zonePointActivationStatus:
+                    self.zonePointList.append(self.cropEventPos(event))
+
+                    if len(self.zonePointList) == 2:
+                        painter.drawLine(self.zonePointList[0].x(), self.zonePointList[0].y(),
+                                         self.zonePointList[1].x(), self.zonePointList[1].y())
+                        self.zonePointList.pop(0)
+
+                # print(self.image.pixel(event.pos().x(), event.pos().y()))
                 self.displayUpdate()
+
+
+
+
 
     def mouseReleaseEvent(self, event):
         if (event.button() == Qt.LeftButton) and self.sketch:
-            if (self.lastPoint == event.pos()):
-                # painter = QPainter(self.image)
-                # painter.setPen(QPen(self.penColor, self.penWidth,
-                #                     Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-                # paint.drawPoint(event.pos())
-                pass
+                painter = QPainter(self.image)
+                painter.setPen(self.pen)
 
+                if self.zoneActivationStatus:
+                    painter.drawRect(self.topCorner.x(), self.topCorner.y(),
+                                    self.cropEventPos(event).x() - self.topCorner.x(),
+                                    self.cropEventPos(event).y() - self.topCorner.y())
+
+                if self.zoneLineActivationStatus:
+                    painter.drawLine(self.topCorner.x(), self.topCorner.y(),
+                                    self.cropEventPos(event).x(), self.cropEventPos(event).y())
+
+                self.displayUpdate()
+                self.inEvent = False
 
     def mouseMoveEvent(self, event):
         if (event.buttons() & Qt.LeftButton) and self.sketch:
@@ -123,13 +176,36 @@ class App(QMainWindow):
                 painter = QPainter(self.image)
                 painter.setPen(QPen(self.penColor, self.penWidth,
                                     Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-                painter.drawLine(self.lastPoint, event.pos())
-                self.lastPoint = event.pos()
+                painter.drawLine(self.lastPoint, self.cropEventPos(event))
+                self.lastPoint = self.cropEventPos(event)
                 self.displayUpdate()
 
     def displayUpdate(self):
         self.update()
         self.label.setPixmap(self.image)
+
+    def addHistory(self):
+        if len(self.history) == self.historyLength:
+            self.history.pop(0)
+        self.history.append(self.image.copy())
+        self.inEvent = True
+
+    def goBack(self):
+        if len(self.history) > 1:
+            del self.history[-1]
+        self.image = self.history[-1]
+
+        self.displayUpdate()
+            #self.update()
+
+    def cropEventPos(self, event):
+        """
+        Because of the toolbar there is an offset on the y axis.
+        To have the correct position based on the image we need to correct this offset
+        Moreover we need to take in account the scrollbar positions.
+        """
+        return QPoint(event.pos().x() + self.scrollArea.horizontalScrollBar().value(),
+                      event.pos().y() - 38 + self.scrollArea.verticalScrollBar().value())
 
     def open(self):
         options = QFileDialog.Options()
@@ -143,9 +219,11 @@ class App(QMainWindow):
 
             self.image = QPixmap.fromImage(image)
             self.label.setPixmap(self.image)
+            # Insert the image in the history
+            self.history.append(self.image.copy())
             self.factor = 1
 
-            self.sketch = True # Allow to paint the image now
+            self.sketch = True
 
             self.scrollArea.setVisible(True)
             #self.printAct.setEnabled(True)
@@ -201,13 +279,58 @@ class App(QMainWindow):
         else:
             pass
 
-    def penActivation(self):
+    def onExtract(self):
+        pass
 
+    def onPenStatus(self):
+        self.disableAllElements(self.penAction)
         if self.penActivationStatus:
             self.penAction.setIcon(QIcon('icon/penOff.png'))
         else:
             self.penAction.setIcon(QIcon('icon/penOn.png'))
         self.penActivationStatus = not self.penActivationStatus
+
+    def onZoneStatus(self):
+        self.disableAllElements(self.zoneAction)
+        if self.zoneActivationStatus:
+            self.zoneAction.setIcon(QIcon('icon/zoneRectangleOff.png'))
+        else:
+            self.zoneAction.setIcon(QIcon('icon/zoneRectangleOn.png'))
+        self.zoneActivationStatus = not self.zoneActivationStatus
+
+    def onZoneLineStatus(self):
+        self.disableAllElements(self.zoneLineAction)
+        if self.zoneLineActivationStatus:
+            self.zoneLineAction.setIcon(QIcon('icon/zoneLineOff.png'))
+        else:
+            self.zoneLineAction.setIcon(QIcon('icon/zoneLineOn.png'))
+        self.zoneLineActivationStatus = not self.zoneLineActivationStatus
+
+    def onZonePointStatus(self):
+        self.disableAllElements(self.zonePointAction)
+        if self.zonePointActivationStatus:
+            self.zonePointAction.setIcon(QIcon('icon/zonePointOff.png'))
+        else:
+            self.zonePointAction.setIcon(QIcon('icon/zonePointOn.png'))
+        self.zonePointActivationStatus = not self.zonePointActivationStatus
+
+    def disableAllElements(self, elementClicked):
+        if elementClicked != self.penAction:
+            self.penActivationStatus = False
+            self.penAction.setIcon(QIcon('icon/penOff.png'))
+
+        if elementClicked != self.zoneAction:
+            self.zoneActivationStatus = False
+            self.zoneAction.setIcon(QIcon('icon/zoneRectangleOff.png'))
+
+        if elementClicked != self.zoneLineAction:
+            self.zoneLineActivationStatus = False
+            self.zoneLineAction.setIcon(QIcon('icon/zoneLineOff.png'))
+
+        if elementClicked != self.zonePointAction:
+            self.zonePointActivationStatus = False
+            self.zonePointAction.setIcon(QIcon('icon/zonePointOff.png'))
+
 
     def center(self):
         qr = self.frameGeometry()
