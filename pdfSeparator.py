@@ -1,5 +1,7 @@
+# -*- coding: utf8 -*-
 import sys
-import copy
+import cv2
+import numpy as np
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
@@ -7,10 +9,17 @@ from PyQt5.QtCore import *
 # https://doc.qt.io/qt-5/qtwidgets-widgets-imageviewer-example.html
 
 screen_size = (None,None)
+developerMode = False
 
 def preBuild(app):
     global screen_size
     screen_size = app.primaryScreen().size()
+
+    if len(sys.argv) > 1:
+        if sys.argv[1] == '--dev':
+            global developerMode
+            developerMode = True
+            print('Developer mode activated')
 
 class App(QMainWindow):
 
@@ -86,7 +95,7 @@ class App(QMainWindow):
         self.zonePointActivationStatus = False
 
         self.extractAction = QAction(QIcon('icon/zoom.png'), '&Extract area', self)
-        self.extractAction.triggered.connect(self.onExtract)
+        self.extractAction.triggered.connect(self.onExtractActivationStatus)
         self.toolbar.addAction(self.extractAction)
         self.extractActivation = False
 
@@ -108,7 +117,7 @@ class App(QMainWindow):
     def initPaint(self):
         self.sketch = False
         self.penWidth = 4
-        self.penColor = QColor(51,51,255)
+        self.penColor = QColor(0,0,255)
         self.pen = QPen(self.penColor, self.penWidth, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
         self.lastPoint = QPoint()
         self.image = None
@@ -117,8 +126,8 @@ class App(QMainWindow):
         self.historyLength = 10
         self.historyShortCut = QShortcut(QKeySequence('Ctrl+Z'), self).activated.connect(self.goBack)
         self.inEvent = False
-
         self.zonePointList = []
+        self.extractOriginPosition = QPoint()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -149,8 +158,9 @@ class App(QMainWindow):
                 # print(self.image.pixel(event.pos().x(), event.pos().y()))
                 self.displayUpdate()
 
-
-
+            if self.extractActivation:
+                self.extractOriginPosition = self.cropEventPos(event)
+                self.onExtract(self.extractOriginPosition)
 
 
     def mouseReleaseEvent(self, event):
@@ -216,6 +226,7 @@ class App(QMainWindow):
             if image is None:
                 QMessageBox.information(self, '', "Impossible de charger {}".format(filename))
                 return
+            self.imagePath = filename
 
             self.image = QPixmap.fromImage(image)
             self.label.setPixmap(self.image)
@@ -279,8 +290,120 @@ class App(QMainWindow):
         else:
             pass
 
-    def onExtract(self):
-        pass
+    def onExtractActivationStatus(self):
+        self.extractActivation = True
+        self.disableAllElements(None)
+
+    def onExtract(self, origin):
+
+        img = self.image.toImage()
+        img.save('tmp/extremeLocation.png')
+
+        colorToDetect = list(self.penColor.getRgb()[:-1])[::-1]
+        """
+        We get only the R,G,B values without the alpha factor and we reverse the
+        list because colorToDetect is RGB and the images are BGR.
+        """
+
+        opencvImg = cv2.imread('tmp/extremeLocation.png',1)
+
+        pixelToDetect = cv2.imread('tmp/colorReference.png')
+        if pixelToDetect is None or pixelToDetect[0][0] is not colorToDetect:
+            pixelToDetect[0][0] = [colorToDetect[0], colorToDetect[1], colorToDetect[2]]
+            cv2.imwrite('tmp/colorReference.png',pixelToDetect)
+
+        pixel = cv2.imread('tmp/colorReference.png')
+        pixel2 = cv2.cvtColor(pixel, cv2.COLOR_BGR2HSV)
+        boundary = pixel2[0][0]
+
+        opencvImg = cv2.cvtColor(opencvImg, cv2.COLOR_BGR2HSV)
+
+        if developerMode:
+            cv2.imwrite('tmp/inter.png',opencvImg)
+        mask = cv2.inRange(opencvImg, boundary, boundary)
+
+        _, cnts, hierarchy = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        extremePoints = []
+        """
+        The extremPOints list store the extreme points of each polygon and their centroid
+        found in the image. This will be helpfull to crop the image later.
+        """
+
+        for c in cnts:
+            M = cv2.moments(c)
+            # calculate x,y coordinate of center
+            cX = int(M["m10"] / M["m00"])
+            cY = int(M["m01"] / M["m00"])
+
+            if developerMode:
+                cv2.circle(opencvImg, (cX, cY), 5, (0, 0, 255), -1)
+                cv2.putText(opencvImg, "centroid", (cX - 25, cY - 25),cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                mask = cv2.drawContours(mask,[c], -1,(255,255,255),-1)
+
+            x, y, w, h = cv2.boundingRect(c)
+            extremePoints.append([(cX,cY),(x,y,w,h)])
+
+            # cv2.rectangle(opencvImg, (x, y), (x+w, y+h), (0, 255, 0), 2)
+
+        if developerMode:
+            cv2.imwrite('tmp/mask.png', mask)
+
+        # The origin is the position clicked by the user which is inside the wanted area
+        originX = origin.x()
+        originY = origin.y()
+
+        if developerMode:
+            cv2.circle(opencvImg, (originX, originY), 5, (255, 255, 255), -1)
+            cv2.imwrite('tmp/moments.png', opencvImg)
+
+        """
+        In the case of several areas, the user can only extract one where he clicked.
+        So we need to find the closest area from the clicked position.
+        """
+
+        def closestArea(extremsPoints, originX, originY, closestDist, indexClosest, index):
+            """
+            The centroidX and centroidY parameters are the centroids argument of
+            an element in the extremePoints list.
+            indexCLosest is the index of the closest area in the extremePoints list.
+            This function is recursive so index is the current position in
+            """
+            if index >= len(extremePoints) or len(extremePoints) == 0:
+                return indexClosest
+
+            (centroidX, centroidY) = extremePoints[index][0]
+            dist = np.sqrt( (originX - centroidX)**2 + (originY - centroidY)**2 )
+            if dist < closestDist:
+                closestDist = dist
+                indexClosest = index
+
+            return closestArea(extremePoints, originX, originY, closestDist, indexClosest, index+1)
+
+        areaToExtract = extremePoints[closestArea(extremePoints, originX, originY, opencvImg.shape[0], 0, 0)]
+        (X, Y, W, H) = areaToExtract[1]
+
+        if developerMode:
+            cv2.rectangle(opencvImg, (X, Y), (X+W, Y+H), (0, 255, 0), 2)
+            cv2.imwrite('tmp/areaToExtract.png', opencvImg)
+
+        """
+        Now we have the extreme points of the area, it's time to crop it.
+        """
+
+        fullImage = cv2.imread(self.imagePath)
+        cropImage = np.zeros([H, W, 3], dtype=np.uint8)
+        cropImage.fill(255)
+
+        inside = False
+        boundaryPixel = 255
+
+        for pY in range(H):
+            for pX in range(W):
+                if mask[Y+pY][X+pX] == boundaryPixel:
+                    cropImage[pY][pX] = fullImage[Y+pY][X+pX]
+
+        cv2.imwrite('tmp/croppedImage.png', cropImage)
 
     def onPenStatus(self):
         self.disableAllElements(self.penAction)
@@ -313,6 +436,7 @@ class App(QMainWindow):
         else:
             self.zonePointAction.setIcon(QIcon('icon/zonePointOn.png'))
         self.zonePointActivationStatus = not self.zonePointActivationStatus
+        self.zonePointList = []
 
     def disableAllElements(self, elementClicked):
         if elementClicked != self.penAction:
@@ -330,6 +454,8 @@ class App(QMainWindow):
         if elementClicked != self.zonePointAction:
             self.zonePointActivationStatus = False
             self.zonePointAction.setIcon(QIcon('icon/zonePointOff.png'))
+
+        self.zonePointList = []
 
 
     def center(self):
