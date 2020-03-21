@@ -1,7 +1,10 @@
 # -*- coding: utf8 -*-
 import sys
 import cv2
+import time
+import img2pdf
 import numpy as np
+from pdf2image import convert_from_path
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
@@ -10,6 +13,7 @@ from PyQt5.QtCore import *
 
 screen_size = (None,None)
 developerMode = False
+dpi = 300.0
 
 def preBuild(app):
     global screen_size
@@ -214,13 +218,20 @@ class App(QMainWindow):
         To have the correct position based on the image we need to correct this offset
         Moreover we need to take in account the scrollbar positions.
         """
-        return QPoint(event.pos().x() + self.scrollArea.horizontalScrollBar().value(),
-                      event.pos().y() - 38 + self.scrollArea.verticalScrollBar().value())
+        return QPoint((event.pos().x() + self.scrollArea.horizontalScrollBar().value()) / self.factor,
+                     (event.pos().y() - 38 + self.scrollArea.verticalScrollBar().value()) / self.factor)
 
     def open(self):
         options = QFileDialog.Options()
-        filename, _ = QFileDialog.getOpenFileName(self, 'Sélectionner une image','','Images (*.png *.jpeg *.jpg *.bmp *.gif)', options=options)
+        filename, _ = QFileDialog.getOpenFileName(self, 'Sélectionner un fichier','','Images (*.pdf *.png *.jpeg *.jpg *.bmp *.gif)', options=options)
         # Modifier pour prendre un pdf puis convertir
+
+        if filename[-3:] == 'pdf':
+            file = convert_from_path(filename, 300)
+            filename = 'tmp/'+filename.split('/')[-1][:-3]+'png'
+            print(filename)
+            file[0].save(filename,'PNG')
+
         if filename:
             image = QImage(filename)
             if image is None:
@@ -296,6 +307,10 @@ class App(QMainWindow):
 
     def onExtract(self, origin):
 
+        if developerMode:
+            start = time.time()
+            print('Extraction of the area: ')
+
         img = self.image.toImage()
         img.save('tmp/extremeLocation.png')
 
@@ -312,6 +327,9 @@ class App(QMainWindow):
             pixelToDetect[0][0] = [colorToDetect[0], colorToDetect[1], colorToDetect[2]]
             cv2.imwrite('tmp/colorReference.png',pixelToDetect)
 
+            if developerMode:
+                print('\tAdd color to detect => ' + str(time.time() - start) + ' s')
+
         pixel = cv2.imread('tmp/colorReference.png')
         pixel2 = cv2.cvtColor(pixel, cv2.COLOR_BGR2HSV)
         boundary = pixel2[0][0]
@@ -320,8 +338,9 @@ class App(QMainWindow):
 
         if developerMode:
             cv2.imwrite('tmp/inter.png',opencvImg)
-        mask = cv2.inRange(opencvImg, boundary, boundary)
+            print('\tConversion to HSV => ' + str(time.time() - start) + ' s')
 
+        mask = cv2.inRange(opencvImg, boundary, boundary)
         _, cnts, hierarchy = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         extremePoints = []
@@ -335,11 +354,11 @@ class App(QMainWindow):
             # calculate x,y coordinate of center
             cX = int(M["m10"] / M["m00"])
             cY = int(M["m01"] / M["m00"])
+            mask = cv2.drawContours(mask,[c], -1,(255,255,255),-1)
 
             if developerMode:
                 cv2.circle(opencvImg, (cX, cY), 5, (0, 0, 255), -1)
-                cv2.putText(opencvImg, "centroid", (cX - 25, cY - 25),cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-                mask = cv2.drawContours(mask,[c], -1,(255,255,255),-1)
+                cv2.putText(opencvImg, "centroid", (cX - 25, cY - 25),cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
             x, y, w, h = cv2.boundingRect(c)
             extremePoints.append([(cX,cY),(x,y,w,h)])
@@ -348,6 +367,7 @@ class App(QMainWindow):
 
         if developerMode:
             cv2.imwrite('tmp/mask.png', mask)
+            print('\tMask and centroids created => ' + str(time.time() - start) + ' s')
 
         # The origin is the position clicked by the user which is inside the wanted area
         originX = origin.x()
@@ -380,12 +400,12 @@ class App(QMainWindow):
 
             return closestArea(extremePoints, originX, originY, closestDist, indexClosest, index+1)
 
-        areaToExtract = extremePoints[closestArea(extremePoints, originX, originY, opencvImg.shape[0], 0, 0)]
-        (X, Y, W, H) = areaToExtract[1]
+        (X, Y, W, H) = extremePoints[closestArea(extremePoints, originX, originY, opencvImg.shape[0], 0, 0)][1]
 
         if developerMode:
             cv2.rectangle(opencvImg, (X, Y), (X+W, Y+H), (0, 255, 0), 2)
             cv2.imwrite('tmp/areaToExtract.png', opencvImg)
+            print('\tFind area to extract => ' + str(time.time() - start) + ' s')
 
         """
         Now we have the extreme points of the area, it's time to crop it.
@@ -404,6 +424,28 @@ class App(QMainWindow):
                     cropImage[pY][pX] = fullImage[Y+pY][X+pX]
 
         cv2.imwrite('tmp/croppedImage.png', cropImage)
+
+        #Image.open('tmp/croppedImage.png').save('tmp/finalImage.png', dpi=(300,300))
+        #pdf_bytes = img2pdf.convert('tmp/croppedImage.png', dpi=300, x=None, y=None)
+        if developerMode:
+            print('\tStart creation of pdf => ' + str(time.time() - start) + ' s')
+
+        """
+        The quality of the pdf is defined with the dpi so in order to have a proper
+        output we need to set the width and the height of the pdf.
+        You can easily check it on a linux system 'pdfimages':
+            pdfimages -list <filename>.pdf
+        """
+
+        dim = (img2pdf.in_to_pt(W/dpi), img2pdf.in_to_pt(H/dpi))
+        layout = img2pdf.get_layout_fun(dim)
+
+        with open('tmp/finalOutput.pdf','wb') as file:
+            file.write(img2pdf.convert('tmp/croppedImage.png', layout_fun = layout))
+
+        if developerMode:
+            print('\tPDF successfully created! => '+ str(time.time() - start) + ' s')
+
 
     def onPenStatus(self):
         self.disableAllElements(self.penAction)
@@ -456,6 +498,7 @@ class App(QMainWindow):
             self.zonePointAction.setIcon(QIcon('icon/zonePointOff.png'))
 
         self.zonePointList = []
+        self.onExtractActivationStatus = False
 
 
     def center(self):
