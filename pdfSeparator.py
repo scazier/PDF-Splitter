@@ -52,56 +52,55 @@ class App(QMainWindow):
         self.exitAction = QAction(QIcon('icon/exit.png'), '&Quit', self)
         self.exitAction.setShortcut('Ctrl+Q')
         self.exitAction.triggered.connect(self.onExit)
-        self.toolbar.addAction(self.exitAction)
 
         self.openAction = QAction(QIcon('icon/open.png'), '&Open file', self)
         self.openAction.setShortcut('Ctrl+O')
         self.openAction.triggered.connect(self.open)
-        self.toolbar.addAction(self.openAction)
 
         #self.toolbar.addWidget(QIcon('icon/zoom.png'))
 
         self.zoomOutAction = QAction(QIcon('icon/minus.png'), '&Zoom Out', self)
-        #zoomOutAction.setShortCut('Ctrl+Maj+-')
         self.zoomOutAction.triggered.connect(self.zoomOut)
         self.zoomOutAction.setEnabled(False)
-        self.toolbar.addAction(self.zoomOutAction)
 
         self.zoomInAction = QAction(QIcon('icon/plus.png'), '&Zoom In', self)
-        #zoomInAction.setShortCut('Ctrl+Maj+=')
         self.zoomInAction.triggered.connect(self.zoomIn)
         self.zoomInAction.setEnabled(False)
-        self.toolbar.addAction(self.zoomInAction)
 
         self.fitWindowAction = QAction(QIcon('icon/fitOff.png'), '&Adjust', self)
         self.fitWindowAction.triggered.connect(self.fitToWindow)
         self.fitWindowAction.setEnabled(False)
-        self.toolbar.addAction(self.fitWindowAction)
 
         self.penAction = QAction(QIcon('icon/penOff.png'), '&Pen', self)
         self.penAction.triggered.connect(self.onPenStatus)
-        self.toolbar.addAction(self.penAction)
         self.penActivationStatus = False
 
         self.zoneAction = QAction(QIcon('icon/zoneRectangleOff.png'), '&Zone rectangle', self)
         self.zoneAction.triggered.connect(self.onZoneStatus)
-        self.toolbar.addAction(self.zoneAction)
         self.zoneActivationStatus = False
 
         self.zoneLineAction = QAction(QIcon('icon/zoneLineOff.png'), '&Zone line', self)
         self.zoneLineAction.triggered.connect(self.onZoneLineStatus)
-        self.toolbar.addAction(self.zoneLineAction)
         self.zoneLineActivationStatus = False
 
         self.zonePointAction = QAction(QIcon('icon/zonePointOff.png'), '&Zone point', self)
         self.zonePointAction.triggered.connect(self.onZonePointStatus)
-        self.toolbar.addAction(self.zonePointAction)
         self.zonePointActivationStatus = False
 
-        self.extractAction = QAction(QIcon('icon/zoom.png'), '&Extract area', self)
+        self.extractAction = QAction(QIcon('icon/exportOff.png'), '&Extract area', self)
         self.extractAction.triggered.connect(self.onExtractActivationStatus)
-        self.toolbar.addAction(self.extractAction)
         self.extractActivation = False
+
+        self.toolbar.addAction(self.exitAction)
+        self.toolbar.addAction(self.openAction)
+        self.toolbar.addAction(self.zoomOutAction)
+        self.toolbar.addAction(self.zoomInAction)
+        self.toolbar.addAction(self.fitWindowAction)
+        self.toolbar.addAction(self.penAction)
+        self.toolbar.addAction(self.zoneAction)
+        self.toolbar.addAction(self.zoneLineAction)
+        self.toolbar.addAction(self.zonePointAction)
+        self.toolbar.addAction(self.extractAction)
 
     def initWorkSpace(self):
         self.fitWindowBool = False
@@ -173,9 +172,22 @@ class App(QMainWindow):
                 painter.setPen(self.pen)
 
                 if self.zoneActivationStatus:
+                    position = self.cropEventPos(event)
+                    (endCornerX, endCornerY) = (position.x(), position.y())
+
+                    if endCornerX < 0:
+                        endCornerX = 0
+                    elif endCornerX > self.image.width():
+                        endCornerX = self.image.width()
+
+                    if endCornerY < 0:
+                        endCornerY = 0
+                    elif endCornerY > self.image.height():
+                        endCornerY = self.image.height()
+
                     painter.drawRect(self.topCorner.x(), self.topCorner.y(),
-                                    self.cropEventPos(event).x() - self.topCorner.x(),
-                                    self.cropEventPos(event).y() - self.topCorner.y())
+                                    endCornerX - self.topCorner.x(),
+                                    endCornerY - self.topCorner.y())
 
                 if self.zoneLineActivationStatus:
                     painter.drawLine(self.topCorner.x(), self.topCorner.y(),
@@ -302,28 +314,43 @@ class App(QMainWindow):
             pass
 
     def onExtractActivationStatus(self):
-        self.extractActivation = True
         self.disableAllElements(None)
+        if self.extractActivation:
+            self.extractAction.setIcon(QIcon('icon/exportOff.png'))
+        else:
+            self.extractAction.setIcon(QIcon('icon/exportOn.png'))
+        self.extractActivation = not self.extractActivation
 
     def onExtract(self, origin):
 
         if developerMode:
             start = time.time()
             print('Extraction of the area: ')
+            print('\tBackup of the new image => ' + str(time.time() - start) + ' s')
 
+        channels_count = 4
         img = self.image.toImage()
-        img.save('tmp/extremeLocation.png')
+        s = img.bits().asstring(img.width() * img.height() * channels_count)
+        opencvImg = np.frombuffer(s, dtype=np.uint8).reshape((img.height(), img.width(), channels_count))
+        cv2.imwrite('tmp/extremeLocation.png', opencvImg)
+        #img.save('tmp/extremeLocation.png')
 
-        colorToDetect = list(self.penColor.getRgb()[:-1])[::-1]
+        if developerMode:
+            print('\tImage saved => ' + str(time.time() - start) + ' s')
+
+        colorToDetect = np.uint8(list(self.penColor.getRgb()[:-1])[::-1])
         """
         We get only the R,G,B values without the alpha factor and we reverse the
         list because colorToDetect is RGB and the images are BGR.
         """
 
-        opencvImg = cv2.imread('tmp/extremeLocation.png',1)
-
+        #opencvImg = cv2.imread('tmp/extremeLocation.png')
         pixelToDetect = cv2.imread('tmp/colorReference.png')
-        if pixelToDetect is None or pixelToDetect[0][0] is not colorToDetect:
+
+        if developerMode:
+            print('\tCheck color to detect => ' + str(time.time() - start) + 's')
+
+        if pixelToDetect is None or (pixelToDetect[0][0] != colorToDetect).all():
             pixelToDetect[0][0] = [colorToDetect[0], colorToDetect[1], colorToDetect[2]]
             cv2.imwrite('tmp/colorReference.png',pixelToDetect)
 
@@ -415,18 +442,16 @@ class App(QMainWindow):
         cropImage = np.zeros([H, W, 3], dtype=np.uint8)
         cropImage.fill(255)
 
-        inside = False
-        boundaryPixel = 255
+        res = cv2.bitwise_and(fullImage, fullImage, mask=mask)
+        res[mask==0] = (255,255,255)
 
-        for pY in range(H):
-            for pX in range(W):
-                if mask[Y+pY][X+pX] == boundaryPixel:
-                    cropImage[pY][pX] = fullImage[Y+pY][X+pX]
+        if developerMode:
+            cv2.imwrite('tmp/bitwise.png', res)
+            print('\tApplication of the mask: ' + str(time.time() - start) + 's')
 
+        cropImage = res[Y:Y+H,X:X+W]
         cv2.imwrite('tmp/croppedImage.png', cropImage)
 
-        #Image.open('tmp/croppedImage.png').save('tmp/finalImage.png', dpi=(300,300))
-        #pdf_bytes = img2pdf.convert('tmp/croppedImage.png', dpi=300, x=None, y=None)
         if developerMode:
             print('\tStart creation of pdf => ' + str(time.time() - start) + ' s')
 
