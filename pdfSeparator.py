@@ -2,18 +2,17 @@
 import sys
 import cv2
 import time
-import img2pdf
 import numpy as np
-from pdf2image import convert_from_path
-from PyQt5.QtWidgets import *
+from pdfPreview import PDF
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
+from PyQt5.QtWidgets import *
+from pdf2image import convert_from_path
 
 # https://doc.qt.io/qt-5/qtwidgets-widgets-imageviewer-example.html
 
 screen_size = (None,None)
 developerMode = False
-dpi = 300.0
 
 def preBuild(app):
     global screen_size
@@ -29,20 +28,21 @@ class App(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        #(self.width, self.height) = (1000,800)
-
         self.initUI()
 
     def initUI(self):
-
         self.toolBar()
         self.initWorkSpace()
         self.initPaint()
+        self.initDev()
 
         self.resize(1000,800)
         #self.showMaximized()
         self.center()
         self.setWindowTitle('pdfSeparator')
+
+    def initDev(self):
+        self.start = None # Variable for time study of the program
 
     def toolBar(self):
         self.toolbar = self.addToolBar('toolbar')
@@ -102,6 +102,9 @@ class App(QMainWindow):
         self.toolbar.addAction(self.zonePointAction)
         self.toolbar.addAction(self.extractAction)
 
+        self.statusBar = QStatusBar()
+        self.setStatusBar(self.statusBar)
+
     def initWorkSpace(self):
         self.fitWindowBool = False
 
@@ -158,7 +161,6 @@ class App(QMainWindow):
                                          self.zonePointList[1].x(), self.zonePointList[1].y())
                         self.zonePointList.pop(0)
 
-                # print(self.image.pixel(event.pos().x(), event.pos().y()))
                 self.displayUpdate()
 
             if self.extractActivation:
@@ -236,13 +238,19 @@ class App(QMainWindow):
     def open(self):
         options = QFileDialog.Options()
         filename, _ = QFileDialog.getOpenFileName(self, 'Sélectionner un fichier','','Images (*.pdf *.png *.jpeg *.jpg *.bmp *.gif)', options=options)
-        # Modifier pour prendre un pdf puis convertir
+
+        if developerMode:
+            self.start = time.time()
+            print('Open and convert file:')
+            print('\tGot filename: ' + filename + ' => ' + str(time.time() - self.start))
 
         if filename[-3:] == 'pdf':
             file = convert_from_path(filename, 300)
             filename = 'tmp/'+filename.split('/')[-1][:-3]+'png'
             print(filename)
             file[0].save(filename,'PNG')
+            if developerMode:
+                print('\tFile converted with success => ' + str(time.time() - self.start))
 
         if filename:
             image = QImage(filename)
@@ -252,21 +260,35 @@ class App(QMainWindow):
             self.imagePath = filename
 
             self.image = QPixmap.fromImage(image)
+            self.label.resize(self.image.width(), self.image.height())
             self.label.setPixmap(self.image)
+
             # Insert the image in the history
             self.history.append(self.image.copy())
-            self.factor = 1
 
+            self.factor = 1.0
             self.sketch = True
 
             self.scrollArea.setVisible(True)
-            #self.printAct.setEnabled(True)
             self.fitWindowAction.setEnabled(True)
             self.zoomInAction.setEnabled(True)
             self.zoomOutAction.setEnabled(True)
 
+
             if not self.fitWindowAction.isChecked():
                 self.label.adjustSize()
+
+            self.initAdjust()
+
+            if developerMode:
+                print('\tFile is now adjusted to the window => ' + str(time.time() - self.start))
+
+        else:
+            pass
+
+    def initAdjust(self):
+        while self.label.height() > self.height() and self.label.width() > self.width():
+            self.scaleImage(0.8)
 
     def zoomIn(self):
         self.scaleImage(1.25)
@@ -299,8 +321,8 @@ class App(QMainWindow):
         self.label.resize(self.factor * self.label.pixmap().size())
         self.adjustScrollBar(self.scrollArea.horizontalScrollBar(), factor)
         self.adjustScrollBar(self.scrollArea.verticalScrollBar(), factor)
-        self.zoomInAction.setEnabled(self.factor < 3.0)
-        self.zoomOutAction.setEnabled(self.factor > .333)
+        self.zoomInAction.setEnabled(self.factor < 10.0)
+        self.zoomOutAction.setEnabled(self.factor > .1)
 
     def adjustScrollBar(self, scrollBar, factor):
         scrollBar.setValue(int(factor * scrollBar.value() + ((factor - 1 ) * scrollBar.pageStep() / 2 )))
@@ -321,42 +343,23 @@ class App(QMainWindow):
             self.extractAction.setIcon(QIcon('icon/exportOn.png'))
         self.extractActivation = not self.extractActivation
 
-    def onExtract(self, origin):
-
-        if developerMode:
-            start = time.time()
-            print('Extraction of the area: ')
-            print('\tBackup of the new image => ' + str(time.time() - start) + ' s')
-
+    def pixmapToArray(self, img):
         channels_count = 4
-        img = self.image.toImage()
         s = img.bits().asstring(img.width() * img.height() * channels_count)
-        opencvImg = np.frombuffer(s, dtype=np.uint8).reshape((img.height(), img.width(), channels_count))
-        cv2.imwrite('tmp/extremeLocation.png', opencvImg)
-        #img.save('tmp/extremeLocation.png')
+        return np.frombuffer(s, dtype=np.uint8).reshape((img.height(), img.width(), channels_count))
 
+    def colorCheck(self, pixelToDetect, colorToDetect):
         if developerMode:
-            print('\tImage saved => ' + str(time.time() - start) + ' s')
-
-        colorToDetect = np.uint8(list(self.penColor.getRgb()[:-1])[::-1])
-        """
-        We get only the R,G,B values without the alpha factor and we reverse the
-        list because colorToDetect is RGB and the images are BGR.
-        """
-
-        #opencvImg = cv2.imread('tmp/extremeLocation.png')
-        pixelToDetect = cv2.imread('tmp/colorReference.png')
-
-        if developerMode:
-            print('\tCheck color to detect => ' + str(time.time() - start) + 's')
+            print('\tCheck color to detect => ' + str(time.time() - self.start) + 's')
 
         if pixelToDetect is None or (pixelToDetect[0][0] != colorToDetect).all():
             pixelToDetect[0][0] = [colorToDetect[0], colorToDetect[1], colorToDetect[2]]
             cv2.imwrite('tmp/colorReference.png',pixelToDetect)
 
             if developerMode:
-                print('\tAdd color to detect => ' + str(time.time() - start) + ' s')
+                print('\tAdd color to detect => ' + str(time.time() - self.start) + ' s')
 
+    def contours(self, opencvImg):
         pixel = cv2.imread('tmp/colorReference.png')
         pixel2 = cv2.cvtColor(pixel, cv2.COLOR_BGR2HSV)
         boundary = pixel2[0][0]
@@ -365,11 +368,14 @@ class App(QMainWindow):
 
         if developerMode:
             cv2.imwrite('tmp/inter.png',opencvImg)
-            print('\tConversion to HSV => ' + str(time.time() - start) + ' s')
+            print('\tConversion to HSV => ' + str(time.time() - self.start) + ' s')
 
         mask = cv2.inRange(opencvImg, boundary, boundary)
         _, cnts, hierarchy = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+        return opencvImg, mask, cnts
+
+    def centroids(self, opencvImg, mask, cnts):
         extremePoints = []
         """
         The extremPOints list store the extreme points of each polygon and their centroid
@@ -390,11 +396,65 @@ class App(QMainWindow):
             x, y, w, h = cv2.boundingRect(c)
             extremePoints.append([(cX,cY),(x,y,w,h)])
 
-            # cv2.rectangle(opencvImg, (x, y), (x+w, y+h), (0, 255, 0), 2)
+        return opencvImg, mask, extremePoints
 
         if developerMode:
             cv2.imwrite('tmp/mask.png', mask)
             print('\tMask and centroids created => ' + str(time.time() - start) + ' s')
+
+    def closestArea(self, extremePoints, originX, originY, closestDist, indexClosest, index):
+        """
+        The centroidX and centroidY parameters are the centroids argument of
+        an element in the extremePoints list.
+        indexCLosest is the index of the closest area in the extremePoints list.
+        This function is recursive so index is the current position in
+        """
+        if index >= len(extremePoints) or len(extremePoints) == 0:
+            return indexClosest
+
+        (centroidX, centroidY) = extremePoints[index][0]
+        dist = np.sqrt( (originX - centroidX)**2 + (originY - centroidY)**2 )
+        if dist < closestDist:
+            closestDist = dist
+            indexClosest = index
+
+        return self.closestArea(extremePoints, originX, originY, closestDist, indexClosest, index+1)
+
+    def onExtract(self, origin):
+
+        self.progressBar = QProgressBar()
+        self.progressBar.setAlignment(Qt.AlignCenter)
+        self.progressBar.setMaximum(100)
+        self.statusBar.addWidget(self.progressBar)
+        self.progressBar.setValue(0)
+
+        if developerMode:
+            self.start = time.time()
+            print('Extraction of the area: ')
+            print('\tBackup of the new image => ' + str(time.time() - self.start) + ' s')
+
+        img = self.image.toImage()
+        opencvImg = self.pixmapToArray(img)
+        cv2.imwrite('tmp/extremeLocation.png', opencvImg)
+
+        if developerMode:
+            print('\tImage saved => ' + str(time.time() - self.start) + ' s')
+
+        colorToDetect = np.uint8(list(self.penColor.getRgb()[:-1])[::-1])
+        """
+        We get only the R,G,B values without the alpha factor and we reverse the
+        list because colorToDetect is RGB and the images are BGR.
+        """
+        self.progressBar.setValue(20)
+
+        opencvImg = cv2.imread('tmp/extremeLocation.png')
+        pixelToDetect = cv2.imread('tmp/colorReference.png')
+
+        self.colorCheck(pixelToDetect, colorToDetect)
+        opencvImg, mask, cnts = self.contours(opencvImg)
+
+        opencvImg, mask, extremePoints = self.centroids(opencvImg, mask, cnts)
+        self.progressBar.setValue(40)
 
         # The origin is the position clicked by the user which is inside the wanted area
         originX = origin.x()
@@ -409,30 +469,13 @@ class App(QMainWindow):
         So we need to find the closest area from the clicked position.
         """
 
-        def closestArea(extremsPoints, originX, originY, closestDist, indexClosest, index):
-            """
-            The centroidX and centroidY parameters are the centroids argument of
-            an element in the extremePoints list.
-            indexCLosest is the index of the closest area in the extremePoints list.
-            This function is recursive so index is the current position in
-            """
-            if index >= len(extremePoints) or len(extremePoints) == 0:
-                return indexClosest
-
-            (centroidX, centroidY) = extremePoints[index][0]
-            dist = np.sqrt( (originX - centroidX)**2 + (originY - centroidY)**2 )
-            if dist < closestDist:
-                closestDist = dist
-                indexClosest = index
-
-            return closestArea(extremePoints, originX, originY, closestDist, indexClosest, index+1)
-
-        (X, Y, W, H) = extremePoints[closestArea(extremePoints, originX, originY, opencvImg.shape[0], 0, 0)][1]
+        (X, Y, W, H) = extremePoints[self.closestArea(extremePoints, originX, originY, opencvImg.shape[0], 0, 0)][1]
+        self.progressBar.setValue(60)
 
         if developerMode:
             cv2.rectangle(opencvImg, (X, Y), (X+W, Y+H), (0, 255, 0), 2)
             cv2.imwrite('tmp/areaToExtract.png', opencvImg)
-            print('\tFind area to extract => ' + str(time.time() - start) + ' s')
+            print('\tFind area to extract => ' + str(time.time() - self.start) + ' s')
 
         """
         Now we have the extreme points of the area, it's time to crop it.
@@ -443,34 +486,19 @@ class App(QMainWindow):
         cropImage.fill(255)
 
         res = cv2.bitwise_and(fullImage, fullImage, mask=mask)
+        self.progressBar.setValue(80)
         res[mask==0] = (255,255,255)
 
         if developerMode:
             cv2.imwrite('tmp/bitwise.png', res)
-            print('\tApplication of the mask: ' + str(time.time() - start) + 's')
+            print('\tApplication of the mask: ' + str(time.time() - self.start) + 's')
 
         cropImage = res[Y:Y+H,X:X+W]
         cv2.imwrite('tmp/croppedImage.png', cropImage)
+        self.progressBar.setValue(100)
 
-        if developerMode:
-            print('\tStart creation of pdf => ' + str(time.time() - start) + ' s')
-
-        """
-        The quality of the pdf is defined with the dpi so in order to have a proper
-        output we need to set the width and the height of the pdf.
-        You can easily check it on a linux system 'pdfimages':
-            pdfimages -list <filename>.pdf
-        """
-
-        dim = (img2pdf.in_to_pt(W/dpi), img2pdf.in_to_pt(H/dpi))
-        layout = img2pdf.get_layout_fun(dim)
-
-        with open('tmp/finalOutput.pdf','wb') as file:
-            file.write(img2pdf.convert('tmp/croppedImage.png', layout_fun = layout))
-
-        if developerMode:
-            print('\tPDF successfully created! => '+ str(time.time() - start) + ' s')
-
+        self.preview = PDF(self.start, cropImage.shape[0], cropImage.shape[1])
+        self.statusBar.removeWidget(self.progressBar)
 
     def onPenStatus(self):
         self.disableAllElements(self.penAction)
@@ -522,8 +550,11 @@ class App(QMainWindow):
             self.zonePointActivationStatus = False
             self.zonePointAction.setIcon(QIcon('icon/zonePointOff.png'))
 
+        if elementClicked != self.extractAction:
+            self.onExtractActivationStatus = False
+            self.extractAction.setIcon(QIcon('icon/exportOff.png'))
+
         self.zonePointList = []
-        self.onExtractActivationStatus = False
 
 
     def center(self):
