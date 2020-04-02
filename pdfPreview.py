@@ -7,17 +7,16 @@ from PyQt5.QtCore import *
 
 developerMode = False
 dpi = 300.0
+statusWindow = 0
 
-class PDF(QMainWindow):
-    def __init__(self, start=None, width=None, height=None):
-        super().__init__()
+class PDF(QWidget):
+    def __init__(self, start=None):
+        super(PDF, self).__init__()
         self.start = start
-        self.exportWidth = width
-        self.exportHeight = height
 
         self.resize(600, 800)
 
-        popupToolbar = self.addToolBar('toolbar')
+        popupToolbar = QToolBar()
         popupToolbar.setMovable(False)
 
         antiRotateAction = QAction(QIcon('icon/antiRotate.png'), '&Rotate -90°', self)
@@ -27,19 +26,27 @@ class PDF(QMainWindow):
         rotateAction.triggered.connect(self.onRotate)
 
         printAction = QAction(QIcon('icon/print.png'), '&Print as PDF', self)
-        printAction.triggered.connect(self.exportTOPDF) #self.exportTOPDF(pixmap.width(), pixmap.height())
+        printAction.triggered.connect(self.exportTOPDF)
+
+        self.colorCheckBox = QAction('Export in color', self, checkable=True)
+        self.colorCheckBox.triggered.connect(self.colorCheck)
 
         popupToolbar.addAction(antiRotateAction)
         popupToolbar.addAction(rotateAction)
         popupToolbar.addAction(printAction)
+        popupToolbar.addAction(self.colorCheckBox)
 
         self.label = QLabel(self)
+        self.label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.label.setAlignment(Qt.AlignCenter)
-        self.setCentralWidget(self.label)
+
         self.image = QImage('tmp/croppedImage.png')
         self.pixmap = QPixmap.fromImage(self.image)
         self.reshape()
         self.label.setPixmap(self.pixmap)
+
+        center = (self.width()/2, self.height()/2)
+        self.label.move(center[0] - self.pixmap.width()/2, center[1] - self.pixmap.height()/2)
 
         self.show()
 
@@ -56,6 +63,9 @@ class PDF(QMainWindow):
         self.pixmap = QPixmap.fromImage(self.image)
         self.reshape()
         self.label.setPixmap(self.pixmap)
+        img = cv2.imread('tmp/croppedImage.png')
+        img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+        cv2.imwrite('tmp/croppedImage.png',img)
 
     def onRotate(self):
         transform = QTransform()
@@ -64,10 +74,21 @@ class PDF(QMainWindow):
         self.pixmap = QPixmap.fromImage(self.image)
         self.reshape()
         self.label.setPixmap(self.pixmap)
+        img = cv2.imread('tmp/croppedImage.png')
+        img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        cv2.imwrite('tmp/croppedImage.png',img)
+
+    def colorCheck(self):
+        if self.colorCheckBox.isChecked():
+            img = cv2.imread('tmp/croppedImage.png', 1)
+        else:
+            img = cv2.imread('tmp/croppedImage.png', 0)
+        cv2.imwrite('tmp/croppedImage.png', img)
 
 
     def exportTOPDF(self):
-        filename, _ = QFileDialog.getSaveFileName(self, 'Export to PDF', '', 'PDF files (*.pdf)')
+        options = QFileDialog.Options()
+        filename, _ = QFileDialog.getSaveFileName(self, 'Export to PDF', '', 'PDF files (*.pdf)', options=options)
         if developerMode:
             print('\tStart creation of pdf => ' + str(time.time() - self.start) + ' s')
 
@@ -77,12 +98,18 @@ class PDF(QMainWindow):
         You can easily check it on a linux system 'pdfimages':
             pdfimages -list <filename>.pdf
         """
+        img = cv2.imread('tmp/croppedImage.png')
 
-        dim = (img2pdf.in_to_pt(self.exportWidth/dpi), img2pdf.in_to_pt(self.exportHeight/dpi))
+        dim = (img2pdf.in_to_pt(img.shape[1]/dpi), img2pdf.in_to_pt(img.shape[0]/dpi))
         layout = img2pdf.get_layout_fun(dim)
+
+        if filename[-3:] != 'pdf':
+            filename = filename + '.pdf'
 
         with open(filename,'wb') as file:
             file.write(img2pdf.convert('tmp/croppedImage.png', layout_fun = layout))
 
         if developerMode:
             print('\tPDF successfully created! => '+ str(time.time() - self.start) + ' s')
+
+        self.close()

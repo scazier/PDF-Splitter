@@ -134,6 +134,7 @@ class App(QMainWindow):
         self.inEvent = False
         self.zonePointList = []
         self.extractOriginPosition = QPoint()
+        self.isDrawn = False
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -142,7 +143,7 @@ class App(QMainWindow):
         if (event.button() == Qt.LeftButton) and self.sketch:
             self.lastPoint = self.cropEventPos(event)
 
-            if not self.inEvent:
+            if not self.inEvent and not self.extractActivation:
                 self.addHistory()
 
             if self.zoneActivationStatus or self.zoneLineActivationStatus:
@@ -152,6 +153,7 @@ class App(QMainWindow):
                 painter = QPainter(self.image)
                 painter.setPen(self.pen)
                 painter.drawPoint(self.cropEventPos(event))
+                self.isDrawn = True
 
                 if self.zonePointActivationStatus:
                     self.zonePointList.append(self.cropEventPos(event))
@@ -190,10 +192,12 @@ class App(QMainWindow):
                     painter.drawRect(self.topCorner.x(), self.topCorner.y(),
                                     endCornerX - self.topCorner.x(),
                                     endCornerY - self.topCorner.y())
+                    self.isDrawn = True
 
                 if self.zoneLineActivationStatus:
                     painter.drawLine(self.topCorner.x(), self.topCorner.y(),
                                     self.cropEventPos(event).x(), self.cropEventPos(event).y())
+                    self.isDrawn = True
 
                 self.displayUpdate()
                 self.inEvent = False
@@ -207,6 +211,7 @@ class App(QMainWindow):
                 painter.drawLine(self.lastPoint, self.cropEventPos(event))
                 self.lastPoint = self.cropEventPos(event)
                 self.displayUpdate()
+                self.isDrawn = True
 
     def displayUpdate(self):
         self.update()
@@ -348,6 +353,22 @@ class App(QMainWindow):
         s = img.bits().asstring(img.width() * img.height() * channels_count)
         return np.frombuffer(s, dtype=np.uint8).reshape((img.height(), img.width(), channels_count))
 
+    def arrayToPixmap(self, im):
+        gray_color_table = [qRgb(i, i, i) for i in range(256)]
+        if im is None:
+            return QImage()
+        if len(im.shape) == 2:  # 1 channel image
+            qim = QImage(im.data, im.shape[1], im.shape[0], im.strides[0], QImage.Format_Indexed8)
+            qim.setColorTable(gray_color_table)
+            return qim
+        elif len(im.shape) == 3:
+            if im.shape[2] == 3:
+                qim = QImage(im.data, im.shape[1], im.shape[0], im.strides[0], QImage.Format_RGB888)
+                return qim
+            elif im.shape[2] == 4:
+                qim = QImage(im.data, im.shape[1], im.shape[0], im.strides[0], QImage.Format_ARGB32)
+                return qim
+
     def colorCheck(self, pixelToDetect, colorToDetect):
         if developerMode:
             print('\tCheck color to detect => ' + str(time.time() - self.start) + 's')
@@ -422,10 +443,23 @@ class App(QMainWindow):
 
     def onExtract(self, origin):
 
+        colorToDetect = np.uint8(list(self.penColor.getRgb()[:-1])[::-1])
+        """
+        We get only the R,G,B values without the alpha factor and we reverse the
+        list because colorToDetect is RGB and the images are BGR.
+        """
+        print(self.isDrawn)
+        if not self.isDrawn:
+            return None
+
         self.progressBar = QProgressBar()
         self.progressBar.setAlignment(Qt.AlignCenter)
         self.progressBar.setMaximum(100)
         self.statusBar.addWidget(self.progressBar)
+        informationLabel = QLabel()
+        informationLabel.setText('Extracting the area...')
+        self.statusBar.addWidget(informationLabel)
+
         self.progressBar.setValue(0)
 
         if developerMode:
@@ -440,11 +474,6 @@ class App(QMainWindow):
         if developerMode:
             print('\tImage saved => ' + str(time.time() - self.start) + ' s')
 
-        colorToDetect = np.uint8(list(self.penColor.getRgb()[:-1])[::-1])
-        """
-        We get only the R,G,B values without the alpha factor and we reverse the
-        list because colorToDetect is RGB and the images are BGR.
-        """
         self.progressBar.setValue(20)
 
         opencvImg = cv2.imread('tmp/extremeLocation.png')
@@ -469,7 +498,13 @@ class App(QMainWindow):
         So we need to find the closest area from the clicked position.
         """
 
-        (X, Y, W, H) = extremePoints[self.closestArea(extremePoints, originX, originY, opencvImg.shape[0], 0, 0)][1]
+        indexExtremePoints = self.closestArea(extremePoints, originX, originY, opencvImg.shape[0], 0, 0)
+        if indexExtremePoints < len(extremePoints):
+            (X, Y, W, H) = extremePoints[indexExtremePoints][1]
+        else:
+            self.statusBar.removeWidget(self.progressBar)
+            self.statusBar.removeWidget(informationLabel)
+            return None
         self.progressBar.setValue(60)
 
         if developerMode:
@@ -497,8 +532,18 @@ class App(QMainWindow):
         cv2.imwrite('tmp/croppedImage.png', cropImage)
         self.progressBar.setValue(100)
 
-        self.preview = PDF(self.start, cropImage.shape[0], cropImage.shape[1])
+        self.preview = PDF(self.start)
         self.statusBar.removeWidget(self.progressBar)
+        self.statusBar.removeWidget(informationLabel)
+
+        fullImage[mask==255] = (188, 185, 196)
+        cv2.imwrite('tmp/newImage.png', fullImage)
+        self.image = QPixmap.fromImage(self.arrayToPixmap(fullImage))
+        self.displayUpdate()
+
+        if len(cnts) == 1:
+            self.isDrawn = False
+
 
     def onPenStatus(self):
         self.disableAllElements(self.penAction)
