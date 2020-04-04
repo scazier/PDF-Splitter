@@ -11,13 +11,15 @@ statusWindow = 0
 
 class PDF(QWidget):
     def __init__(self, start=None):
-        super(PDF, self).__init__()
+        QWidget.__init__(self)
+        layout = QGridLayout()
+        self.setLayout(layout)
         self.start = start
 
         self.resize(600, 800)
 
         popupToolbar = QToolBar()
-        popupToolbar.setMovable(False)
+        layout.addWidget(popupToolbar)
 
         antiRotateAction = QAction(QIcon('icon/antiRotate.png'), '&Rotate -90°', self)
         antiRotateAction.triggered.connect(self.onAntiRotate)
@@ -37,6 +39,7 @@ class PDF(QWidget):
         popupToolbar.addAction(self.colorCheckBox)
 
         self.label = QLabel(self)
+        layout.addWidget(self.label)
         self.label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.label.setAlignment(Qt.AlignCenter)
 
@@ -48,6 +51,7 @@ class PDF(QWidget):
         center = (self.width()/2, self.height()/2)
         self.label.move(center[0] - self.pixmap.width()/2, center[1] - self.pixmap.height()/2)
 
+        self.setWindowModality(Qt.WindowModal)
         self.show()
 
     def reshape(self):

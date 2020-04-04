@@ -533,16 +533,20 @@ class App(QMainWindow):
         self.progressBar.setValue(100)
 
         self.preview = PDF(self.start)
+        self.preview.setWindowModality(Qt.WindowModal)
         self.statusBar.removeWidget(self.progressBar)
         self.statusBar.removeWidget(informationLabel)
 
+        print('here')
+
+        if len(cnts) == 1:
+            self.isDrawn = False
+
+    def updateLabel(self, fullImage):
         fullImage[mask==255] = (188, 185, 196)
         cv2.imwrite('tmp/newImage.png', fullImage)
         self.image = QPixmap.fromImage(self.arrayToPixmap(fullImage))
         self.displayUpdate()
-
-        if len(cnts) == 1:
-            self.isDrawn = False
 
 
     def onPenStatus(self):
