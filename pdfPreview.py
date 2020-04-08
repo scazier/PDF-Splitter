@@ -10,11 +10,13 @@ dpi = 300.0
 statusWindow = 0
 
 class PDF(QWidget):
-    def __init__(self, start=None):
+    def __init__(self, mainInstance, fullImage, start=None):
         QWidget.__init__(self)
         layout = QGridLayout()
         self.setLayout(layout)
         self.start = start
+        self.mainInstance = mainInstance
+        self.fullImage = fullImage
 
         self.resize(600, 800)
 
@@ -115,5 +117,9 @@ class PDF(QWidget):
 
         if developerMode:
             print('\tPDF successfully created! => '+ str(time.time() - self.start) + ' s')
+
+        cv2.imwrite('tmp/newImage.png', self.fullImage)
+        self.mainInstance.image = QPixmap.fromImage(self.mainInstance.arrayToPixmap(self.fullImage))
+        self.mainInstance.displayUpdate()
 
         self.close()

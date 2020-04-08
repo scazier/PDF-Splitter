@@ -28,6 +28,7 @@ class App(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self.setWindowIcon(QIcon('icon/pdf.png'))
         self.initUI()
 
     def initUI(self):
@@ -448,7 +449,6 @@ class App(QMainWindow):
         We get only the R,G,B values without the alpha factor and we reverse the
         list because colorToDetect is RGB and the images are BGR.
         """
-        print(self.isDrawn)
         if not self.isDrawn:
             return None
 
@@ -532,21 +532,16 @@ class App(QMainWindow):
         cv2.imwrite('tmp/croppedImage.png', cropImage)
         self.progressBar.setValue(100)
 
-        self.preview = PDF(self.start)
+        fullImage[mask==255] = (188, 185, 196)
+
+        self.preview = PDF(self, fullImage, self.start)
         self.preview.setWindowModality(Qt.WindowModal)
         self.statusBar.removeWidget(self.progressBar)
         self.statusBar.removeWidget(informationLabel)
 
-        print('here')
 
         if len(cnts) == 1:
             self.isDrawn = False
-
-    def updateLabel(self, fullImage):
-        fullImage[mask==255] = (188, 185, 196)
-        cv2.imwrite('tmp/newImage.png', fullImage)
-        self.image = QPixmap.fromImage(self.arrayToPixmap(fullImage))
-        self.displayUpdate()
 
 
     def onPenStatus(self):
