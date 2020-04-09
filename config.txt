@@ -1,0 +1,6 @@
+# This file is used to configure the main parameters such as:
+#	- dpi
+#	- path to save pdf
+
+dpi=300.0
+savePath=tmp/

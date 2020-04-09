@@ -1,22 +1,26 @@
+#-*- coding:utf-8 -*-
 import cv2
+import time
 import img2pdf
+import datetime
 import numpy as np
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 
-developerMode = False
-dpi = 300.0
-statusWindow = 0
 
 class PDF(QWidget):
-    def __init__(self, mainInstance, fullImage, start=None):
+    def __init__(self, mainInstance, fullImage, dpi, savepath, developerMode=False, start=None):
         QWidget.__init__(self)
         layout = QGridLayout()
         self.setLayout(layout)
         self.start = start
+        self.dpi = dpi
+        self.savepath = savepath
         self.mainInstance = mainInstance
         self.fullImage = fullImage
+        self.developerMode = developerMode
+        self.img = cv2.imread('tmp/croppedImage.png')
 
         self.resize(600, 800)
 
@@ -69,9 +73,7 @@ class PDF(QWidget):
         self.pixmap = QPixmap.fromImage(self.image)
         self.reshape()
         self.label.setPixmap(self.pixmap)
-        img = cv2.imread('tmp/croppedImage.png')
-        img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
-        cv2.imwrite('tmp/croppedImage.png',img)
+        self.img = cv2.rotate(self.img, cv2.ROTATE_90_CLOCKWISE)
 
     def onRotate(self):
         transform = QTransform()
@@ -80,45 +82,43 @@ class PDF(QWidget):
         self.pixmap = QPixmap.fromImage(self.image)
         self.reshape()
         self.label.setPixmap(self.pixmap)
-        img = cv2.imread('tmp/croppedImage.png')
-        img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        cv2.imwrite('tmp/croppedImage.png',img)
+        self.img = cv2.rotate(self.img, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
     def colorCheck(self):
         if self.colorCheckBox.isChecked():
-            img = cv2.imread('tmp/croppedImage.png', 1)
+            self.img = cv2.imread('tmp/croppedImage.png', 1)
         else:
-            img = cv2.imread('tmp/croppedImage.png', 0)
-        cv2.imwrite('tmp/croppedImage.png', img)
+            self.img = cv2.imread('tmp/croppedImage.png', 0)
 
 
     def exportTOPDF(self):
-        options = QFileDialog.Options()
-        filename, _ = QFileDialog.getSaveFileName(self, 'Export to PDF', '', 'PDF files (*.pdf)', options=options)
-        if developerMode:
+        if self.developerMode:
             print('\tStart creation of pdf => ' + str(time.time() - self.start) + ' s')
 
         """
         The quality of the pdf is defined with the dpi so in order to have a proper
         output we need to set the width and the height of the pdf.
-        You can easily check it on a linux system 'pdfimages':
+        You can easily check it on a linux system with 'pdfimages':
             pdfimages -list <filename>.pdf
         """
-        img = cv2.imread('tmp/croppedImage.png')
+        cv2.imwrite('tmp/croppedImage.png', self.img)
 
-        dim = (img2pdf.in_to_pt(img.shape[1]/dpi), img2pdf.in_to_pt(img.shape[0]/dpi))
+        dim = (img2pdf.in_to_pt(self.img.shape[1]/self.dpi), img2pdf.in_to_pt(self.img.shape[0]/self.dpi))
         layout = img2pdf.get_layout_fun(dim)
 
-        if filename[-3:] != 'pdf':
-            filename = filename + '.pdf'
+        if self.savepath[-1] != '/':
+            self.savepath += '/'
 
-        with open(filename,'wb') as file:
+        filename = '-'.join(str(datetime.datetime.now()).split('.')[0].split(' '))+".pdf"
+
+        with open(self.savepath+filename,'wb') as file:
             file.write(img2pdf.convert('tmp/croppedImage.png', layout_fun = layout))
 
-        if developerMode:
+        if self.developerMode:
             print('\tPDF successfully created! => '+ str(time.time() - self.start) + ' s')
 
-        cv2.imwrite('tmp/newImage.png', self.fullImage)
+        # Update the main window label to hide the extracted zone
+        cv2.imwrite('tmp/processedImage.png', self.fullImage)
         self.mainInstance.image = QPixmap.fromImage(self.mainInstance.arrayToPixmap(self.fullImage))
         self.mainInstance.displayUpdate()
 

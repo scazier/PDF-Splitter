@@ -1,4 +1,5 @@
 # -*- coding: utf8 -*-
+import os
 import sys
 import cv2
 import time
@@ -13,9 +14,13 @@ from pdf2image import convert_from_path
 
 screen_size = (None,None)
 developerMode = False
+dpi = 300.0
+savepath = "tmp/"
 
 def preBuild(app):
     global screen_size
+    global dpi
+    global savepath
     screen_size = app.primaryScreen().size()
 
     if len(sys.argv) > 1:
@@ -23,6 +28,16 @@ def preBuild(app):
             global developerMode
             developerMode = True
             print('Developer mode activated')
+
+    with open('config.txt') as config:
+        content = config.readlines()
+        content = [x.strip().split('=') for x in content if x[0] not in ['#','',' ','\n','\t']]
+        for line in content:
+            if line[0] == "dpi" and float(line[1]) != dpi:
+                dpi = float(line[1])
+            if line[0] == "savePath" and line[1] != savepath:
+                savepath = line[1]
+        print(dpi, savepath)
 
 class App(QMainWindow):
 
@@ -292,6 +307,11 @@ class App(QMainWindow):
         else:
             pass
 
+        # Remove a previous processed image if exists
+        pathProcessed = os.listdir('tmp/')
+        if "processedImage.png" in pathProcessed:
+            os.remove('tmp/processedImage.png')
+
     def initAdjust(self):
         while self.label.height() > self.height() and self.label.width() > self.width():
             self.scaleImage(0.8)
@@ -468,21 +488,20 @@ class App(QMainWindow):
             print('\tBackup of the new image => ' + str(time.time() - self.start) + ' s')
 
         img = self.image.toImage()
-        opencvImg = self.pixmapToArray(img)
-        cv2.imwrite('tmp/extremeLocation.png', opencvImg)
+        self.opencvImg = self.pixmapToArray(img)
+        cv2.imwrite('tmp/extremeLocation.png', self.opencvImg)
 
         if developerMode:
             print('\tImage saved => ' + str(time.time() - self.start) + ' s')
 
         self.progressBar.setValue(20)
 
-        opencvImg = cv2.imread('tmp/extremeLocation.png')
         pixelToDetect = cv2.imread('tmp/colorReference.png')
 
         self.colorCheck(pixelToDetect, colorToDetect)
-        opencvImg, mask, cnts = self.contours(opencvImg)
+        self.opencvImg, mask, cnts = self.contours(self.opencvImg)
 
-        opencvImg, mask, extremePoints = self.centroids(opencvImg, mask, cnts)
+        self.opencvImg, mask, extremePoints = self.centroids(self.opencvImg, mask, cnts)
         self.progressBar.setValue(40)
 
         # The origin is the position clicked by the user which is inside the wanted area
@@ -490,15 +509,15 @@ class App(QMainWindow):
         originY = origin.y()
 
         if developerMode:
-            cv2.circle(opencvImg, (originX, originY), 5, (255, 255, 255), -1)
-            cv2.imwrite('tmp/moments.png', opencvImg)
+            cv2.circle(self.opencvImg, (originX, originY), 5, (255, 255, 255), -1)
+            cv2.imwrite('tmp/moments.png', self.opencvImg)
 
         """
         In the case of several areas, the user can only extract one where he clicked.
         So we need to find the closest area from the clicked position.
         """
 
-        indexExtremePoints = self.closestArea(extremePoints, originX, originY, opencvImg.shape[0], 0, 0)
+        indexExtremePoints = self.closestArea(extremePoints, originX, originY, self.opencvImg.shape[0], 0, 0)
         if indexExtremePoints < len(extremePoints):
             (X, Y, W, H) = extremePoints[indexExtremePoints][1]
         else:
@@ -508,15 +527,20 @@ class App(QMainWindow):
         self.progressBar.setValue(60)
 
         if developerMode:
-            cv2.rectangle(opencvImg, (X, Y), (X+W, Y+H), (0, 255, 0), 2)
-            cv2.imwrite('tmp/areaToExtract.png', opencvImg)
+            cv2.rectangle(self.opencvImg, (X, Y), (X+W, Y+H), (0, 255, 0), 2)
+            cv2.imwrite('tmp/areaToExtract.png', self.opencvImg)
             print('\tFind area to extract => ' + str(time.time() - self.start) + ' s')
 
         """
         Now we have the extreme points of the area, it's time to crop it.
         """
 
-        fullImage = cv2.imread(self.imagePath)
+        tmpList = os.listdir('tmp/')
+        if "processedImage.png" in tmpList:
+            fullImage = cv2.imread('tmp/processedImage.png')
+        else:
+            fullImage = cv2.imread(self.imagePath)
+
         cropImage = np.zeros([H, W, 3], dtype=np.uint8)
         cropImage.fill(255)
 
@@ -534,7 +558,10 @@ class App(QMainWindow):
 
         fullImage[mask==255] = (188, 185, 196)
 
-        self.preview = PDF(self, fullImage, self.start)
+        if developerMode:
+            self.preview = PDF(self, fullImage, dpi, savepath, developerMode, self.start)
+        else:
+            self.preview = PDF(self, fullImage, dpi, savepath)
         self.preview.setWindowModality(Qt.WindowModal)
         self.statusBar.removeWidget(self.progressBar)
         self.statusBar.removeWidget(informationLabel)
