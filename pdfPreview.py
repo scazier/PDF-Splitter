@@ -1,12 +1,15 @@
 #-*- coding:utf-8 -*-
+import os
+import sys
 import cv2
 import time
 import img2pdf
 import datetime
 import numpy as np
-from PyQt5.QtWidgets import *
-from PyQt5.QtGui import *
-from PyQt5.QtCore import *
+from PyQt5.QtWidgets import (QAction, QLabel, QToolBar, QSizePolicy, QWidget,
+                             QGridLayout)
+from PyQt5.QtGui import QIcon, QImage, QPixmap
+from PyQt5.QtCore import Qt
 
 
 class PDF(QWidget):
@@ -110,6 +113,7 @@ class PDF(QWidget):
             self.savepath += '/'
 
         filename = '-'.join(str(datetime.datetime.now()).split('.')[0].split(' '))+".pdf"
+        filename = filename.replace(':','-')
 
         with open(self.savepath+filename,'wb') as file:
             file.write(img2pdf.convert('tmp/croppedImage.png', layout_fun = layout))

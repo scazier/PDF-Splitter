@@ -5,10 +5,14 @@ import cv2
 import time
 import numpy as np
 from pdfPreview import PDF
-from PyQt5.QtGui import *
-from PyQt5.QtCore import *
-from PyQt5.QtWidgets import *
 from pdf2image import convert_from_path
+from PyQt5.QtCore import Qt, QPoint
+from PyQt5.QtGui import (QIcon, QPalette, QColor, QPen,
+                         QKeySequence, QPainter, QImage, QPixmap, qRgb)
+from PyQt5.QtWidgets import (QMainWindow, QApplication, QWidget, QFileDialog,
+                             QMessageBox, QAction, QStatusBar, QLabel, QSizePolicy,
+                             QScrollArea, QShortcut, QDesktopWidget, QProgressBar)
+
 
 # https://doc.qt.io/qt-5/qtwidgets-widgets-imageviewer-example.html
 
@@ -107,6 +111,10 @@ class App(QMainWindow):
         self.extractAction.triggered.connect(self.onExtractActivationStatus)
         self.extractActivation = False
 
+        self.checkedAction = QAction(QIcon('icon/checkedOff.png'), '&Sign pdf as processed', self)
+        self.checkedAction.triggered.connect(self.onCheckedActivationStatus)
+        self.checkedActivation = False
+
         self.toolbar.addAction(self.exitAction)
         self.toolbar.addAction(self.openAction)
         self.toolbar.addAction(self.zoomOutAction)
@@ -117,6 +125,7 @@ class App(QMainWindow):
         self.toolbar.addAction(self.zoneLineAction)
         self.toolbar.addAction(self.zonePointAction)
         self.toolbar.addAction(self.extractAction)
+        self.toolbar.addAction(self.checkedAction)
 
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
@@ -156,34 +165,35 @@ class App(QMainWindow):
         painter = QPainter(self)
 
     def mousePressEvent(self, event):
-        if (event.button() == Qt.LeftButton) and self.sketch:
-            self.lastPoint = self.cropEventPos(event)
+        if event.button() == Qt.LeftButton:
+            if self.sketch:
+                self.lastPoint = self.cropEventPos(event)
 
-            if not self.inEvent and not self.extractActivation:
-                self.addHistory()
+                if not self.inEvent and not self.extractActivation:
+                    self.addHistory()
 
-            if self.zoneActivationStatus or self.zoneLineActivationStatus:
-                self.topCorner = self.lastPoint
+                if self.zoneActivationStatus or self.zoneLineActivationStatus:
+                    self.topCorner = self.lastPoint
 
-            if self.penActivationStatus or self.zonePointActivationStatus:
-                painter = QPainter(self.image)
-                painter.setPen(self.pen)
-                painter.drawPoint(self.cropEventPos(event))
-                self.isDrawn = True
+                if self.penActivationStatus or self.zonePointActivationStatus:
+                    painter = QPainter(self.image)
+                    painter.setPen(self.pen)
+                    painter.drawPoint(self.cropEventPos(event))
+                    self.isDrawn = True
 
-                if self.zonePointActivationStatus:
-                    self.zonePointList.append(self.cropEventPos(event))
+                    if self.zonePointActivationStatus:
+                        self.zonePointList.append(self.cropEventPos(event))
 
-                    if len(self.zonePointList) == 2:
-                        painter.drawLine(self.zonePointList[0].x(), self.zonePointList[0].y(),
-                                         self.zonePointList[1].x(), self.zonePointList[1].y())
-                        self.zonePointList.pop(0)
+                        if len(self.zonePointList) == 2:
+                            painter.drawLine(self.zonePointList[0].x(), self.zonePointList[0].y(),
+                                             self.zonePointList[1].x(), self.zonePointList[1].y())
+                            self.zonePointList.pop(0)
 
-                self.displayUpdate()
+                    self.displayUpdate()
 
-            if self.extractActivation:
-                self.extractOriginPosition = self.cropEventPos(event)
-                self.onExtract(self.extractOriginPosition)
+        if self.extractActivation:
+            self.extractOriginPosition = self.cropEventPos(event)
+            self.onExtract(self.extractOriginPosition)
 
 
     def mouseReleaseEvent(self, event):
@@ -259,6 +269,8 @@ class App(QMainWindow):
     def open(self):
         options = QFileDialog.Options()
         filename, _ = QFileDialog.getOpenFileName(self, 'Sélectionner un fichier','','Images (*.pdf *.png *.jpeg *.jpg *.bmp *.gif)', options=options)
+
+        self.filename = filename
 
         if developerMode:
             self.start = time.time()
@@ -604,6 +616,20 @@ class App(QMainWindow):
         self.zonePointActivationStatus = not self.zonePointActivationStatus
         self.zonePointList = []
 
+    def onCheckedActivationStatus(self):
+        msgBox = QMessageBox()
+        msgBox.setIcon(QMessageBox.Information)
+        msgBox.setText("Voulez vous marquer le fichier comme traité")
+        msgBox.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+
+        returnValue = msgBox.exec()
+        if returnValue == QMessageBox.Ok:
+            path = '/'.join(self.filename.split('/')[:-1])
+            newFilename = "/PROCESSED-" + self.filename.split('/')[-1]
+            os.rename(self.filename, path+newFilename)
+            self.disableAllElements(None)
+            self.checkedAction.setIcon(QIcon('icon/checkedOn.png'))
+
     def disableAllElements(self, elementClicked):
         if elementClicked != self.penAction:
             self.penActivationStatus = False
@@ -622,7 +648,7 @@ class App(QMainWindow):
             self.zonePointAction.setIcon(QIcon('icon/zonePointOff.png'))
 
         if elementClicked != self.extractAction:
-            self.onExtractActivationStatus = False
+            self.extractActivation = False
             self.extractAction.setIcon(QIcon('icon/exportOff.png'))
 
         self.zonePointList = []
