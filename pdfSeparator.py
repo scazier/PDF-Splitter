@@ -3,6 +3,7 @@ import os
 import sys
 import cv2
 import time
+import datetime
 import numpy as np
 from pdfPreview import PDF
 from pdf2image import convert_from_path
@@ -625,7 +626,12 @@ class App(QMainWindow):
         returnValue = msgBox.exec()
         if returnValue == QMessageBox.Ok:
             path = '/'.join(self.filename.split('/')[:-1])
-            newFilename = "/PROCESSED-" + self.filename.split('/')[-1]
+            newFilename = "/PROCESSED-"
+            print(newFilename[1:]+self.filename.split('/')[-1], os.listdir(path))
+            if newFilename[1:]+self.filename.split('/')[-1] in os.listdir(path):
+                newFilename += '-'.join(str(datetime.datetime.now()).split('.')[0].split(' ')) + '-'
+            newFilename += self.filename.split('/')[-1]
+
             os.rename(self.filename, path+newFilename)
             self.disableAllElements(None)
             self.checkedAction.setIcon(QIcon('icon/checkedOn.png'))
