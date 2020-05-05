@@ -627,7 +627,7 @@ class App(QMainWindow):
         if returnValue == QMessageBox.Ok:
             path = '/'.join(self.filename.split('/')[:-1])
             newFilename = "/PROCESSED-"
-            print(newFilename[1:]+self.filename.split('/')[-1], os.listdir(path))
+
             if newFilename[1:]+self.filename.split('/')[-1] in os.listdir(path):
                 newFilename += '-'.join(str(datetime.datetime.now()).split('.')[0].split(' ')) + '-'
             newFilename += self.filename.split('/')[-1]
