@@ -8,7 +8,7 @@ import datetime
 import numpy as np
 from PyQt5.QtWidgets import (QAction, QLabel, QToolBar, QSizePolicy, QWidget,
                              QGridLayout)
-from PyQt5.QtGui import QIcon, QImage, QPixmap
+from PyQt5.QtGui import QIcon, QImage, QPixmap, QTransform
 from PyQt5.QtCore import Qt
 
 
